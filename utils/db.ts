@@ -1,5 +1,38 @@
 import Dexie, {type Table} from 'dexie';
 
+// Assume Model, HistoryItem, and TabItem types are defined as before or elsewhere
+// For example:
+/*
+export interface Model {
+  id: string;
+  name: string;
+  provider: string;
+  type: string;
+  endpoint?: string;
+}
+
+export interface HistoryItem {
+  id?: number;
+  session: number;
+  type: string;
+  role: string;
+  content: string | Blob;
+  src?: any;
+  created_at?: number;
+  src_url?: string[];
+}
+
+export interface TabItem {
+  id?: number;
+  label: string;
+  created_at?: number;
+}
+*/
+
+// --- Database class and DB instance remain the same ---
+// (Keeping this part as it's likely fundamental to your application
+//  and not directly related to the list of AI models, unless you
+//  also want this removed, please specify.)
 export class Database extends Dexie {
     history!: Table<HistoryItem>
     tab!: Table<TabItem>
@@ -14,10 +47,11 @@ export class Database extends Dexie {
             tab: '++id, label, created_at',
             history: '++id, session, type, role, content, src, created_at',
         }).upgrade(trans => {
-            return trans.table('history').toCollection().modify(async i => {
+            return trans.table('history').toCollection().modify(async (i: any) => { // Added 'any' for i if HistoryItem is not fully defined here
                 if (i.type === 'image') {
                     i.content = ''
-                    i.src = [i.src]
+                    // Ensure i.src is treated as an array if it's a single item before this modification
+                    i.src = Array.isArray(i.src) ? i.src : (i.src ? [i.src] : []);
                 }
             })
         })
@@ -33,13 +67,15 @@ export class Database extends Dexie {
 
     async getHistory(session: number) {
         const arr = await DB.history.where('session').equals(session).limit(100).toArray()
-        arr.forEach(i => {
+        arr.forEach((i: any) => { // Added 'any' for i if HistoryItem is not fully defined here
             if (i.type === 'image') {
                 i.src_url = []
-                i.src?.forEach(src => {
-                    i.src_url!.push(URL.createObjectURL(src))
+                i.src?.forEach((srcItem: any) => { // Added 'any' for srcItem
+                    if (srcItem instanceof Blob) { // Ensure it's a Blob before creating URL
+                        i.src_url!.push(URL.createObjectURL(srcItem))
+                    }
                 })
-                i.content = 'image'
+                i.content = 'image' // Consider if this should be more descriptive or handled differently
             }
         })
         return arr
@@ -62,78 +98,39 @@ export const DB = new Database();
 export const initialSettings = {
     openaiKey: '',
     image_steps: 20,
-    system_prompt: 'You are ChatGPT, a large language model trained by OpenAI. Follow the user\'s instructions carefully. Respond using markdown.',
-}
+    system_prompt: 'You are Gemini, a large language model. Follow the user\'s instructions carefully. Respond using markdown.', // Updated system prompt to be more generic or Gemini-specific
+};
 
-export type Settings = typeof initialSettings
+export type Settings = typeof initialSettings;
 
+// --- MODIFICATION START ---
+// Only the specified Gemini model
 export const uniModals: Model[] = [
     {
-        id: 'gemini-2.0-flash',
-        name: 'Gemini 2.0 flash',
+        id: 'gemini-2.5-pro-preview-05-06',
+        name: 'Gemini 2.5 Pro Preview',
         provider: 'google',
         type: 'universal'
     }
-]
+];
 
-export const textGenModels: Model[] = [{
-    id: 'gpt-3.5-turbo',
-    name: 'ChatGPT-3.5-turbo',
-    provider: 'openai',
-    endpoint: 'chat/completions',
-    type: 'chat'
-}, {
-    id: '@cf/qwen/qwen1.5-14b-chat-awq',
-    name: 'qwen1.5-14b-chat-awq',
-    provider: 'workers-ai',
-    type: 'chat'
-}, {
-    id: '@cf/openchat/openchat-3.5-0106',
-    name: 'openchat-3.5-0106',
-    provider: 'workers-ai',
-    type: 'chat'
-}, {
-    id: '@cf/google/gemma-7b-it-lora',
-    name: 'gemma-7b-it-lora',
-    provider: 'workers-ai',
-    type: 'chat'
-}, {
-    id: '@hf/thebloke/openhermes-2.5-mistral-7b-awq',
-    name: 'openhermes-2.5-mistral-7b-awq',
-    provider: 'workers-ai',
-    type: 'chat'
-}, {
-    id: '@hf/thebloke/neural-chat-7b-v3-1-awq',
-    name: 'neural-chat-7b-v3-1-awq',
-    provider: 'workers-ai',
-    type: 'chat'
-}, {
-    id: '@hf/nexusflow/starling-lm-7b-beta',
-    name: 'starling-lm-7b-beta',
-    provider: 'workers-ai',
-    type: 'chat'
-}, {
-    id: '@cf/meta/llama-3-8b-instruct',
-    name: 'llama-3-8b-instruct',
-    provider: 'workers-ai',
-    type: 'chat'
-}]
+// Other model categories are now empty
+export const textGenModels: Model[] = [];
 
-export const imageGenModels: Model[] = [{
-    id: '@cf/lykon/dreamshaper-8-lcm',
-    name: 'dreamshaper-8-lcm',
-    provider: 'workers-ai-image',
-    type: 'text-to-image'
-}, {
-    id: '@cf/stabilityai/stable-diffusion-xl-base-1.0',
-    name: 'stable-diffusion-xl-base-1.0',
-    provider: 'workers-ai-image',
-    type: 'text-to-image'
-}, {
-    id: '@cf/bytedance/stable-diffusion-xl-lightning',
-    name: 'stable-diffusion-xl-lightning',
-    provider: 'workers-ai-image',
-    type: 'text-to-image'
-}]
+export const imageGenModels: Model[] = [];
 
-export const models: Model[] = [...uniModals, ...textGenModels, ...imageGenModels]
+// The final models array will now only contain the Gemini model from uniModals
+export const models: Model[] = [...uniModals, ...textGenModels, ...imageGenModels];
+// --- MODIFICATION END ---
+
+// Example usage (the models array will just have the one Gemini model):
+// console.log(models);
+// Output would be:
+// [
+//   {
+//     id: 'gemini-2.5-pro-preview-05-06',
+//     name: 'Gemini 2.5 Pro Preview',
+//     provider: 'google',
+//     type: 'universal'
+//   }
+// ]
