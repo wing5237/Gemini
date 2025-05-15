@@ -107,8 +107,8 @@ export type Settings = typeof initialSettings;
 // Only the specified Gemini model
 export const uniModals: Model[] = [
     {
-        id: 'gemini-2.5-pro-preview-05-06',
-        name: 'Gemini 2.5 Pro Preview',
+        id: 'gemini-2.0-flash',
+        name: 'Gemini 2.0 Flash',
         provider: 'google',
         type: 'universal'
     }
