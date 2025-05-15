@@ -30,9 +30,6 @@ export interface TabItem {
 */
 
 // --- Database class and DB instance remain the same ---
-// (Keeping this part as it's likely fundamental to your application
-//  and not directly related to the list of AI models, unless you
-//  also want this removed, please specify.)
 export class Database extends Dexie {
     history!: Table<HistoryItem>
     tab!: Table<TabItem>
@@ -47,10 +44,9 @@ export class Database extends Dexie {
             tab: '++id, label, created_at',
             history: '++id, session, type, role, content, src, created_at',
         }).upgrade(trans => {
-            return trans.table('history').toCollection().modify(async (i: any) => { // Added 'any' for i if HistoryItem is not fully defined here
+            return trans.table('history').toCollection().modify(async (i: any) => {
                 if (i.type === 'image') {
                     i.content = ''
-                    // Ensure i.src is treated as an array if it's a single item before this modification
                     i.src = Array.isArray(i.src) ? i.src : (i.src ? [i.src] : []);
                 }
             })
@@ -67,15 +63,15 @@ export class Database extends Dexie {
 
     async getHistory(session: number) {
         const arr = await DB.history.where('session').equals(session).limit(100).toArray()
-        arr.forEach((i: any) => { // Added 'any' for i if HistoryItem is not fully defined here
+        arr.forEach((i: any) => {
             if (i.type === 'image') {
                 i.src_url = []
-                i.src?.forEach((srcItem: any) => { // Added 'any' for srcItem
-                    if (srcItem instanceof Blob) { // Ensure it's a Blob before creating URL
+                i.src?.forEach((srcItem: any) => {
+                    if (srcItem instanceof Blob) {
                         i.src_url!.push(URL.createObjectURL(srcItem))
                     }
                 })
-                i.content = 'image' // Consider if this should be more descriptive or handled differently
+                i.content = 'image'
             }
         })
         return arr
@@ -98,13 +94,13 @@ export const DB = new Database();
 export const initialSettings = {
     openaiKey: '',
     image_steps: 20,
-    system_prompt: 'You are Gemini, a large language model. Follow the user\'s instructions carefully. Respond using markdown.', // Updated system prompt to be more generic or Gemini-specific
+    system_prompt: 'You are Gemini 2.0 Flash, a large language model. Follow the user\'s instructions carefully. Respond using markdown.', // System prompt reflecting the chosen model
 };
 
 export type Settings = typeof initialSettings;
 
 // --- MODIFICATION START ---
-// Only the specified Gemini model
+// Using exactly the ID and Name you specified.
 export const uniModals: Model[] = [
     {
         id: 'gemini-2.0-flash',
@@ -125,12 +121,3 @@ export const models: Model[] = [...uniModals, ...textGenModels, ...imageGenModel
 
 // Example usage (the models array will just have the one Gemini model):
 // console.log(models);
-// Output would be:
-// [
-//   {
-//     id: 'gemini-2.0-flash',
-//     name: 'Gemini 2.0 Flash',
-//     provider: 'google',
-//     type: 'universal'
-//   }
-// ]
