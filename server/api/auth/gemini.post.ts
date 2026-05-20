@@ -10,25 +10,38 @@ export default defineEventHandler(async (event) => {
     const messages: OpenAIMessage[] = JSON.parse(<string>body.get('messages'))
     const files = body.getAll('files') as File[]
 
-    const m = genAI.getGenerativeModel({model, safetySettings})
-    let msg = messages.slice(1)
+    // 1. 初始化模型并强行注入官方联网搜索
+    const m = genAI.getGenerativeModel({
+        model, 
+        safetySettings,
+        tools: [{ googleSearch: {} }] 
+    })
+
+    // 2. 修复上下文裁剪 Bug：不再盲目 slice(1)，而是过滤掉系统提示词，保留所有真实对话
+    // 同时过滤掉最后一项（最新消息），因为最新消息要通过 sendMessageStream 发送
+    const historyMessages = messages.filter(m => m.role !== 'system');
+    const latestMessage = historyMessages.pop(); // 弹出最后一项作为当前提问
+
+    if (!latestMessage) {
+        return new Response('明细数据为空，请重新开始对话', {status: 400})
+    }
 
     let res
     if (files.length) {
+        // 带图片的处理逻辑
         const imageParts = await Promise.all(files.map(fileToGenerativePart))
-        const prompt = msg.at(-1)
-        if (prompt === undefined) {
-            return new Response('对话失效，请重新开始对话', {status: 400})
-        }
-        res = await m.generateContentStream([prompt.content, ...imageParts])
+        res = await m.generateContentStream([latestMessage.content, ...imageParts])
     } else {
+        // 3. 完美的标准多轮对话上下文映射
         const chat = m.startChat({
-            history: msg.slice(0, -1).map(m => ({
-                role: m.role === 'assistant' ? 'model' : m.role === 'user' ? 'user' : 'function',
-                parts: [{text: m.content}]
+            history: historyMessages.map(m => ({
+                // Gemini 的角色只认 'user' 和 'model'，这里做精准转换
+                role: m.role === 'assistant' ? 'model' : 'user',
+                parts: [{ text: m.content }]
             }))
         })
-        res = await chat.sendMessageStream(msg[msg.length - 1].content)
+        // 发送最新的一条消息
+        res = await chat.sendMessageStream(latestMessage.content)
     }
 
     const textEncoder = new TextEncoder()
@@ -39,10 +52,9 @@ export default defineEventHandler(async (event) => {
                     controller.enqueue(textEncoder.encode(chunk.text()))
                 } catch (e) {
                     console.error(e)
-                    controller.enqueue(textEncoder.encode('已触发安全限制，请重新开始对话'))
+                    controller.enqueue(textEncoder.encode('已触发安全限制或获取内容失败，请重新开始对话'))
                 }
             }
-
             controller.close()
         }
     })
