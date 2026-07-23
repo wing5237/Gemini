@@ -5,7 +5,7 @@ import { OpenAIMessage } from "~/utils/types";
 import fs from 'fs';
 
 export default defineEventHandler(async (event) => {
-    // 【黑科技】将 Vercel 环境变量中的 JSON 临时写入 /tmp 目录，供 Anthropic SDK 读取
+    // 将 Vercel 环境变量中的 GCP 密钥写入临时文件供 Anthropic SDK 使用
     if (!process.env.GOOGLE_APPLICATION_CREDENTIALS && process.env.GCP_SERVICE_ACCOUNT_KEY) {
         const keyPath = '/tmp/gcp-key.json';
         fs.writeFileSync(keyPath, process.env.GCP_SERVICE_ACCOUNT_KEY);
@@ -25,23 +25,20 @@ export default defineEventHandler(async (event) => {
     }
 
     const textEncoder = new TextEncoder();
+    const projectId = process.env.GCP_PROJECT_ID || 'gen-lang-client-0570098364';
 
-    // ==========================================
-    // 逻辑分支 A：处理 Claude 模型
-    // ==========================================
-    if (model.includes('claude')) {
+    // 1. Claude 模型处理分支
+    if (model && model.includes('claude')) {
         const client = new AnthropicVertex({
             region: 'us-central1',
-            projectId: process.env.GCP_PROJECT_ID || 'gen-lang-client-0570098364',
+            projectId: projectId,
         });
 
-        // 构造 Claude 的历史消息格式
         const claudeMessages = historyMessages.map(m => ({
             role: m.role === 'assistant' ? 'assistant' : 'user',
             content: m.content
         }));
 
-        // 处理当前问题（包含图片解析）
         let currentContent: any[] = [{ type: 'text', text: latestMessage.content }];
         if (files.length) {
             const imageParts = await Promise.all(files.map(async (file) => ({
@@ -58,7 +55,7 @@ export default defineEventHandler(async (event) => {
 
         try {
             const stream = await client.messages.create({
-                model: model, // 前端传过来的 claude-sonnet-4-6
+                model: model,
                 max_tokens: 4096,
                 messages: claudeMessages as any,
                 stream: true,
@@ -73,7 +70,6 @@ export default defineEventHandler(async (event) => {
                             }
                         }
                     } catch (e: any) {
-                        console.error("Claude 流读取错误:", e);
                         controller.enqueue(textEncoder.encode(`\n[Claude 调用失败: ${e.message}]`));
                     } finally {
                         controller.close();
@@ -86,9 +82,7 @@ export default defineEventHandler(async (event) => {
         }
     }
 
-    // ==========================================
-    // 逻辑分支 B：处理 Gemini 模型
-    // ==========================================
+    // 2. Gemini 模型处理分支 (Vertex AI 模式)
     let credentials = {};
     try {
         credentials = JSON.parse(process.env.GCP_SERVICE_ACCOUNT_KEY || '{}');
@@ -96,7 +90,7 @@ export default defineEventHandler(async (event) => {
 
     const ai = new GoogleGenAI({
         vertexai: true,
-        project: process.env.GCP_PROJECT_ID || 'gen-lang-client-0570098364',
+        project: projectId,
         location: 'us-central1',
         googleAuthOptions: { credentials },
     });
@@ -149,7 +143,6 @@ export default defineEventHandler(async (event) => {
                     }
                 }
             } catch (e) {
-                console.error(e);
                 controller.enqueue(textEncoder.encode('\n[Gemini 触发安全限制或获取内容失败]'));
             } finally {
                 controller.close();
