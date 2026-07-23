@@ -3,17 +3,18 @@ import { OpenAIMessage } from "~/utils/types";
 
 export default defineEventHandler(async (event) => {
     const apiKey = process.env.G_API_KEY;
-    const projectId = 'gen-lang-client-0570098364';
+    const projectId = process.env.GCP_PROJECT_ID;
     const location = 'us-central1';
 
     if (!apiKey) {
         return new Response('未配置 G_API_KEY 环境变量', { status: 500 });
     }
+    if (!projectId) {
+        return new Response('未配置 GCP_PROJECT_ID 环境变量', { status: 500 });
+    }
 
     const body = await readFormData(event);
-    // 直接使用前端传参，默认使用 3.6
     const model = (body.get('model') as string) || 'gemini-3.6-flash';
-
     const messages: OpenAIMessage[] = JSON.parse(<string>body.get('messages'));
     const files = body.getAll('files') as File[];
 
@@ -24,6 +25,7 @@ export default defineEventHandler(async (event) => {
         return new Response('明细数据为空，请重新开始对话', { status: 400 });
     }
 
+    // 使用环境变量中的 Project ID 动态拼接 Vertex AI / Agent Platform 标准端点
     const endpointUrl = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
 
     const contents: any[] = [];
