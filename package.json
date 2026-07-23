@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "nuxt build --preset=vercel_edge",
+    "build": "nuxt build --preset=vercel",
     "build_node": "nuxt build",
     "dev": "nuxt dev",
     "generate": "nuxt generate",
@@ -20,6 +20,7 @@
     "vue-router": "^4.3.2"
   },
   "dependencies": {
+    "@google/genai": "latest",
     "@google/generative-ai": "^0.12.0",
     "@nuxt/ui": "^2.16.0",
     "dexie": "^4.0.7",
