@@ -81,7 +81,7 @@ export const uniModals: Model[] = [
         name: 'Gemini 3.5 Flash Lite',
         provider: 'google',
         type: 'universal'
-    }
+    }，
     {
         id: 'claude-sonnet-4-6', 
         name: 'Claude Sonnet 4.6',
