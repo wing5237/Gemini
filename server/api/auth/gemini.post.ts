@@ -1,68 +1,102 @@
-import {GoogleGenerativeAI, HarmBlockThreshold, HarmCategory, SafetySetting} from '@google/generative-ai'
-import {headers} from '~/utils/helper';
-import {OpenAIMessage} from "~/utils/types";
-
-const genAI = new GoogleGenerativeAI(process.env.G_API_KEY!)
+import { GoogleGenAI } from '@google/genai';
+import { headers } from '~/utils/helper';
+import { OpenAIMessage } from "~/utils/types";
 
 export default defineEventHandler(async (event) => {
-    const body = await readFormData(event)
-    const model = body.get('model') as string
-    const messages: OpenAIMessage[] = JSON.parse(<string>body.get('messages'))
-    const files = body.getAll('files') as File[]
+    // 1. 解析 GCP 服务账号密钥
+    let credentials = {};
+    try {
+        credentials = JSON.parse(process.env.GCP_SERVICE_ACCOUNT_KEY || '{}');
+    } catch (e) {
+        console.error("密钥解析失败，请检查 GCP_SERVICE_ACCOUNT_KEY 环境变量");
+    }
 
-    // 1. 初始化模型并强行注入官方联网搜索
-    const m = genAI.getGenerativeModel({
-        model, 
-        safetySettings,
-        tools: [{ googleSearch: {} }] 
-    })
+    // 2. 初始化 Vertex AI 客户端
+    const ai = new GoogleGenAI({
+        vertexai: true,
+        project: process.env.GCP_PROJECT_ID,
+        location: 'us-central1', // 推荐使用 us-central1 获取最全模型支持
+        googleAuthOptions: {
+            credentials,
+        },
+    });
 
-    // 2. 修复上下文裁剪 Bug：不再盲目 slice(1)，而是过滤掉系统提示词，保留所有真实对话
-    // 同时过滤掉最后一项（最新消息），因为最新消息要通过 sendMessageStream 发送
+    const body = await readFormData(event);
+    const model = body.get('model') as string;
+    const messages: OpenAIMessage[] = JSON.parse(<string>body.get('messages'));
+    const files = body.getAll('files') as File[];
+
+    // 过滤掉系统提示词，保留真实对话
     const historyMessages = messages.filter(m => m.role !== 'system');
-    const latestMessage = historyMessages.pop(); // 弹出最后一项作为当前提问
+    const latestMessage = historyMessages.pop();
 
     if (!latestMessage) {
-        return new Response('明细数据为空，请重新开始对话', {status: 400})
+        return new Response('明细数据为空，请重新开始对话', { status: 400 });
     }
 
-    let res
-    if (files.length) {
-        // 带图片的处理逻辑
-        const imageParts = await Promise.all(files.map(fileToGenerativePart))
-        res = await m.generateContentStream([latestMessage.content, ...imageParts])
-    } else {
-        // 3. 完美的标准多轮对话上下文映射
-        const chat = m.startChat({
-            history: historyMessages.map(m => ({
-                // Gemini 的角色只认 'user' 和 'model'，这里做精准转换
-                role: m.role === 'assistant' ? 'model' : 'user',
-                parts: [{ text: m.content }]
-            }))
-        })
-        // 发送最新的一条消息
-        res = await chat.sendMessageStream(latestMessage.content)
+    // 统一配置项：安全设置与工具
+    const config = {
+        safetySettings: [
+            { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+            { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+            { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+            { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+        ],
+        tools: [{ googleSearch: {} }]
+    };
+
+    let responseStream;
+
+    try {
+        if (files.length) {
+            // 带图片的处理逻辑
+            const imageParts = await Promise.all(files.map(fileToGenerativePart));
+            responseStream = await ai.models.generateContentStream({
+                model,
+                contents: [...imageParts, latestMessage.content],
+                config
+            });
+        } else {
+            // 标准多轮对话逻辑
+            const chat = ai.chats.create({
+                model,
+                history: historyMessages.map(m => ({
+                    role: m.role === 'assistant' ? 'model' : 'user',
+                    parts: [{ text: m.content }]
+                })),
+                config
+            });
+            responseStream = await chat.sendMessageStream({
+                message: latestMessage.content
+            });
+        }
+    } catch (error: any) {
+        return new Response('API 调用失败: ' + error.message, { status: 500 });
     }
 
-    const textEncoder = new TextEncoder()
+    // 处理流式输出
+    const textEncoder = new TextEncoder();
     const readableStream = new ReadableStream({
         async start(controller) {
-            for await (const chunk of res.stream) {
-                try {
-                    controller.enqueue(textEncoder.encode(chunk.text()))
-                } catch (e) {
-                    console.error(e)
-                    controller.enqueue(textEncoder.encode('已触发安全限制或获取内容失败，请重新开始对话'))
+            try {
+                for await (const chunk of responseStream) {
+                    if (chunk.text) {
+                        controller.enqueue(textEncoder.encode(chunk.text));
+                    }
                 }
+            } catch (e) {
+                console.error(e);
+                controller.enqueue(textEncoder.encode('\n[已触发安全限制或获取内容失败，请重新开始对话]'));
+            } finally {
+                controller.close();
             }
-            controller.close()
         }
-    })
+    });
 
     return new Response(readableStream, {
         headers,
-    })
-})
+    });
+});
 
 async function fileToGenerativePart(file: File) {
     return {
@@ -72,22 +106,3 @@ async function fileToGenerativePart(file: File) {
         },
     };
 }
-
-const safetySettings: SafetySetting[] = [
-    {
-        category: HarmCategory.HARM_CATEGORY_HARASSMENT,
-        threshold: HarmBlockThreshold.BLOCK_NONE,
-    },
-    {
-        category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-        threshold: HarmBlockThreshold.BLOCK_NONE,
-    },
-    {
-        category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-        threshold: HarmBlockThreshold.BLOCK_NONE,
-    },
-    {
-        category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-        threshold: HarmBlockThreshold.BLOCK_NONE,
-    },
-]
