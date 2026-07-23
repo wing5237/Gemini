@@ -82,6 +82,12 @@ export const uniModals: Model[] = [
         provider: 'google',
         type: 'universal'
     }
+    {
+        id: 'claude-sonnet-4-6', 
+        name: 'Claude Sonnet 4.6',
+        provider: 'anthropic', 
+        type: 'universal'
+    }
 ];
 
 export const textGenModels: Model[] = [];
