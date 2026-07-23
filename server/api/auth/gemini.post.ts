@@ -3,13 +3,17 @@ import { OpenAIMessage } from "~/utils/types";
 
 export default defineEventHandler(async (event) => {
     const apiKey = process.env.G_API_KEY;
+    const projectId = 'gen-lang-client-0570098364';
+    const location = 'us-central1';
 
     if (!apiKey) {
         return new Response('未配置 G_API_KEY 环境变量', { status: 500 });
     }
 
     const body = await readFormData(event);
-    const model = (body.get('model') as string) || 'gemini-3.5-flash-lite';
+    // 直接使用前端传参，默认使用 3.6
+    const model = (body.get('model') as string) || 'gemini-3.6-flash';
+
     const messages: OpenAIMessage[] = JSON.parse(<string>body.get('messages'));
     const files = body.getAll('files') as File[];
 
@@ -20,12 +24,9 @@ export default defineEventHandler(async (event) => {
         return new Response('明细数据为空，请重新开始对话', { status: 400 });
     }
 
-    // 切换为标准的 Gemini API 端点（适配 Agent Platform 的 API Key）
-    const endpointUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
+    const endpointUrl = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
 
-    // 组装 contents
     const contents: any[] = [];
-
     for (const msg of historyMessages) {
         contents.push({
             role: msg.role === 'assistant' ? 'model' : 'user',
@@ -59,26 +60,23 @@ export default defineEventHandler(async (event) => {
             { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
             { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
             { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
-        ],
-        tools: [{ googleSearch: {} }]
+        ]
     };
 
     let upstreamResponse;
     try {
         upstreamResponse = await globalThis.fetch(endpointUrl, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
     } catch (error: any) {
-        return new Response('连接 API 失败: ' + error.message, { status: 500 });
+        return new Response('连接 Agent Platform 失败: ' + error.message, { status: 500 });
     }
 
     if (!upstreamResponse.ok || !upstreamResponse.body) {
         const errText = await upstreamResponse.text();
-        return new Response(`API 拒绝请求 (${upstreamResponse.status}): ${errText}`, { status: 500 });
+        return new Response(`Agent Platform 拒绝请求 (${upstreamResponse.status}): ${errText}`, { status: 500 });
     }
 
     const textEncoder = new TextEncoder();
