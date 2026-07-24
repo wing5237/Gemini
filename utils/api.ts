@@ -15,6 +15,3 @@ export function workersImageReq(req: WorkersReqImage) {
 export function geminiReq(req: FormData, onStream: (data: unknown) => void) {
     return streamFetchWithFile('/gemini', req, onStream)
 }
-export function claudeReq(req: FormData, onStream: (data: unknown) => void) {
-    return streamFetchWithFile('/claude', req, onStream)
-}
