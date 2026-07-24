@@ -65,6 +65,8 @@ export default defineEventHandler(async (event) => {
             model: model,
             contents: contents,
             config: {
+                // 原生启用谷歌搜索，无需第三方 API Key
+                tools: [{ googleSearch: {} }],
                 safetySettings: [
                     { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
                     { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
