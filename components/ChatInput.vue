@@ -27,8 +27,8 @@ const p = defineProps<{
   }[]) => void
 }>()
 
-// 做了严格的类型防御，兼容回车(KeyboardEvent)与点击(MouseEvent)
-function handleInput(e?: any) {
+function handleInput(e: any) {
+  // 兼容回车和鼠标点击事件
   if (e && e.type === 'keydown') {
     if (e.shiftKey) {
       input.value += '\n'
@@ -42,16 +42,10 @@ function handleInput(e?: any) {
   if (input.value.trim() === '') return
   if (p.loading) return
   
-  try {
-    // 确保提取出普通数组，防止响应式代理带来的异常
-    const filesToPass = Array.from(toRaw(fileList.value) || []);
-    p.handleSend(input.value, addHistory.value, filesToPass)
-    input.value = ''
-    fileList.value = []
-  } catch (error) {
-    console.error("提交数据失败:", error);
-    alert("发送失败，请检查控制台错误日志");
-  }
+  // 发送数据
+  p.handleSend(input.value, addHistory.value, toRaw(fileList.value))
+  input.value = ''
+  fileList.value = []
 }
 
 function checkFile(file: File) {
@@ -75,8 +69,8 @@ function handleAddFiles() {
       if (!checkFile(f)) continue;
       
       let file = f;
-      // 仅图片走压缩，文档走原生
-      if (f.type.startsWith('image/')) {
+      // 增加安全校验：确保 f.type 存在
+      if (f.type && f.type.startsWith('image/')) {
         try {
           file = await compressionFile(f, f.type)
         } catch (e) {
@@ -115,12 +109,12 @@ const handlePaste = (e: ClipboardEvent) => {
     <div class="absolute bottom-10 w-full flex flex-col">
       <UButton class="self-center drop-shadow-xl mb-1 blur-global" color="white"
                @click="openModelSelect=!openModelSelect">
-        {{ selectedModel.name }}
+        {{ selectedModel?.name || 'Model' }}
         <template #trailing>
           <UIcon name="i-heroicons-chevron-down-solid"/>
         </template>
       </UButton>
-      <ul v-if="selectedModel.type === 'universal'" style="margin: 0"
+      <ul v-if="selectedModel?.type === 'universal'" style="margin: 0"
           class="flex flex-wrap bg-white dark:bg-[#121212] rounded-t-md">
         <li v-for="file in fileList" :key="file.url" class="relative group/img flex items-center">
           <button @click="fileList.splice(fileList.indexOf(file), 1)"
@@ -131,13 +125,14 @@ const handlePaste = (e: ClipboardEvent) => {
             </svg>
           </button>
           
-          <img v-if="file.file.type.startsWith('image/')" :src="file.url"
+          <!-- 核心修复点：加入 `?.` 防御空引用渲染报错 -->
+          <img v-if="file?.file?.type && file.file.type.startsWith('image/')" :src="file.url"
                class="max-h-16 m-1 shadow-xl cursor-pointer group-hover/img:brightness-75 transition-all rounded-md"
                alt="selected image" @click="handleImgZoom($event.target as HTMLImageElement)"/>
           
           <div v-else class="max-h-16 m-1 p-2 bg-gray-100 dark:bg-gray-800 rounded-md flex items-center text-xs space-x-1 border border-gray-200 dark:border-gray-700">
             <UIcon name="i-heroicons-document-text-solid" class="w-5 h-5 text-primary-500" />
-            <span class="max-w-[100px] truncate">{{ file.file.name }}</span>
+            <span class="max-w-[100px] truncate">{{ file?.file?.name || '附件' }}</span>
           </div>
         </li>
       </ul>
@@ -147,7 +142,7 @@ const handlePaste = (e: ClipboardEvent) => {
         <UButton class="m-1" @click="addHistory = !addHistory" :color="addHistory?'primary':'gray'"
                  icon="i-heroicons-clock-solid"/>
       </UTooltip>
-      <UTooltip v-if="selectedModel.type === 'universal'" :text="$t('add_image') + '(' + $t('support_paste') + ')'">
+      <UTooltip v-if="selectedModel?.type === 'universal'" :text="$t('add_image') + '(' + $t('support_paste') + ')'">
         <UButton @click="handleAddFiles" color="white" class="m-1" icon="i-heroicons-paper-clip-16-solid"/>
       </UTooltip>
       <UTextarea v-model="input" :placeholder="$t('please_input_text') + '...' "
