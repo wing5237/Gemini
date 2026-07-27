@@ -16,7 +16,8 @@ export default defineEventHandler(async (event) => {
     const messages: OpenAIMessage[] = JSON.parse(<string>body.get('messages'));
     const files = body.getAll('files') as File[];
 
-    const historyMessages = messages.filter(m => m.role !== 'system');
+    // 1. 上下文滑动窗口压缩：过滤 system 后，只保留最近的 40 条记录（即 20 轮对话）
+    const historyMessages = messages.filter(m => m.role !== 'system').slice(-40);
     const latestMessage = historyMessages.pop();
 
     if (!latestMessage) {
@@ -31,18 +32,23 @@ export default defineEventHandler(async (event) => {
         });
     }
 
+    // 2. 多模态文件与图片处理透传
     const latestParts: any[] = [];
     if (files.length) {
         for (const file of files) {
             const buffer = Buffer.from(await file.arrayBuffer());
+            // 提取准确的 MIME 类型，确保大模型能正确识别是 PDF 还是图像
+            const mimeType = file.type || 'application/octet-stream';
+            
             latestParts.push({
                 inlineData: {
-                    mimeType: file.type,
+                    mimeType: mimeType,
                     data: buffer.toString('base64')
                 }
             });
         }
     }
+    // 将最新输入的文字追加到文件数据之后
     latestParts.push({ text: latestMessage.content });
 
     contents.push({
@@ -50,9 +56,11 @@ export default defineEventHandler(async (event) => {
         parts: latestParts
     });
 
-    // 初始化最新 SDK
+    // 3. 初始化最新 SDK，兼容 Cloudflare 代理
     const ai = new GoogleGenAI({
         apiKey: apiKey,
+        // 若使用你的 Cloudflare Worker 代理域名，取消下方注释：
+        // baseUrl: 'https://api.wingjj.dpdns.org',
         vertexai: projectId ? {
             project: projectId,
             location: location
@@ -65,7 +73,6 @@ export default defineEventHandler(async (event) => {
             model: model,
             contents: contents,
             config: {
-                // 原生启用谷歌搜索，无需第三方 API Key
                 tools: [{ googleSearch: {} }],
                 safetySettings: [
                     { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
