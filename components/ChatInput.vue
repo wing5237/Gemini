@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import {compressionFile, handleImgZoom} from "~/utils/tools";
+import { ref, watch, onMounted, onUnmounted, toRaw } from "vue";
+import { compressionFile, handleImgZoom } from "~/utils/tools";
 
 const input = ref('')
 const addHistory = ref(true)
-// 修复了丢失的 [] 数组类型声明
 const fileList = ref<{
   file: File
   url: string
 }[]>([])
-const {openModelSelect} = useGlobalState()
+const { openModelSelect } = useGlobalState()
 
 onMounted(() => {
   addHistory.value = localStorage.getItem('addHistory') === 'true'
@@ -27,19 +27,31 @@ const p = defineProps<{
   }[]) => void
 }>()
 
-function handleInput(e: KeyboardEvent) {
-  if (e.shiftKey) {
-    input.value += '\n'
-  }
-  if (e.isComposing || e.shiftKey) {
-    return
+// 做了严格的类型防御，兼容回车(KeyboardEvent)与点击(MouseEvent)
+function handleInput(e?: any) {
+  if (e && e.type === 'keydown') {
+    if (e.shiftKey) {
+      input.value += '\n'
+      return
+    }
+    if (e.isComposing) {
+      return
+    }
   }
 
   if (input.value.trim() === '') return
   if (p.loading) return
-  p.handleSend(input.value, addHistory.value, toRaw(fileList.value))
-  input.value = ''
-  fileList.value = []
+  
+  try {
+    // 确保提取出普通数组，防止响应式代理带来的异常
+    const filesToPass = Array.from(toRaw(fileList.value) || []);
+    p.handleSend(input.value, addHistory.value, filesToPass)
+    input.value = ''
+    fileList.value = []
+  } catch (error) {
+    console.error("提交数据失败:", error);
+    alert("发送失败，请检查控制台错误日志");
+  }
 }
 
 function checkFile(file: File) {
@@ -53,7 +65,7 @@ function checkFile(file: File) {
 function handleAddFiles() {
   const fileInput = document.createElement('input')
   fileInput.type = 'file'
-  fileInput.accept = '*' // 允许所有格式
+  fileInput.accept = '*' // 允许任意格式
   fileInput.multiple = true
   fileInput.onchange = async () => {
     document.body.style.cursor = 'wait'
@@ -63,11 +75,12 @@ function handleAddFiles() {
       if (!checkFile(f)) continue;
       
       let file = f;
+      // 仅图片走压缩，文档走原生
       if (f.type.startsWith('image/')) {
         try {
           file = await compressionFile(f, f.type)
         } catch (e) {
-          console.error('Image compression failed:', e)
+          console.error('图片压缩失败:', e)
         }
       }
 
