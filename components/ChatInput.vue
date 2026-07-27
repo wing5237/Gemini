@@ -41,26 +41,24 @@ function handleInput(e: KeyboardEvent) {
   fileList.value = []
 }
 
-// 保留原有的图片类型数组，防止复制粘贴时报错
 const imageType = ['image/png', 'image/jpeg', 'image/webp', 'image/heic', 'image/heif']
 
 function checkFile(file: File) {
   if (fileList.value.length >= 5) {
-    alert('You can only upload up to 5 files')
+    alert('You can only upload up to 5 images')
     return false
   }
-  // 【核心修改1】：注释掉格式拦截，允许所有文件
-  // if (imageType.indexOf(file.type) === -1) {
-  //   alert(imageType.join(', ') + ' only')
-  //   return false
-  // }
+  if (imageType.indexOf(file.type) === -1) {
+    alert(imageType.join(', ') + ' only')
+    return false
+  }
   return true
 }
 
 function handleAddFiles() {
   const input = document.createElement('input')
   input.type = 'file'
-  input.accept = '*' // 【核心修改2】：允许选择所有格式
+  input.accept = imageType.join(',')
   input.multiple = true
   input.onchange = async () => {
     document.body.style.cursor = 'wait'
@@ -68,17 +66,7 @@ function handleAddFiles() {
     const files = Array.from(input.files || [])
     for (const f of files) {
       if (!checkFile(f)) continue;
-      
-      let file = f;
-      // 【核心修改3】：增加判断，只压缩图片，PDF和TXT原样透传
-      if (f.type.startsWith('image/')) {
-        try {
-          file = await compressionFile(f, f.type)
-        } catch (e) {
-          console.error(e)
-        }
-      }
-      
+      const file = await compressionFile(f, f.type)
       const url = URL.createObjectURL(file)
       fileList.value.push({file, url})
     }
