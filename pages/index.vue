@@ -226,7 +226,7 @@ async function addFiles(files: {
   const historyItem: HistoryItem = {
     session,
     role: 'user',
-    content: 'input image',
+    content: '[上传了附件]',
     type: 'image',
     created_at: Date.now(),
     src: files.map(i => i.file),
