@@ -41,7 +41,6 @@ function handleInput(e: KeyboardEvent) {
   fileList.value = []
 }
 
-// 检查文件数量限制（允许单次上传最多 5 个文件）
 function checkFile(file: File) {
   if (fileList.value.length >= 5) {
     alert('You can only upload up to 5 files')
@@ -51,34 +50,34 @@ function checkFile(file: File) {
 }
 
 function handleAddFiles() {
-  const fileInput = document.createElement('input')
-  fileInput.type = 'file'
-  fileInput.accept = '*' // 允许选取任意文件格式
-  fileInput.multiple = true
-  fileInput.onchange = async () => {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = '*' // 允许选择任意格式文件
+  input.multiple = true
+  input.onchange = async () => {
     document.body.style.cursor = 'wait'
 
-    const files = Array.from(fileInput.files || [])
+    const files = Array.from(input.files || [])
     for (const f of files) {
       if (!checkFile(f)) continue;
       
       let file = f;
-      // 仅对图片格式做压缩处理，文档等非图片类型不执行压缩
+      // 仅对图片格式执行压缩，PDF/TXT等文档保持原样
       if (f.type.startsWith('image/')) {
         try {
           file = await compressionFile(f, f.type)
         } catch (e) {
-          console.error('Image compression failed:', e)
+          console.error(e)
         }
       }
-
+      
       const url = URL.createObjectURL(file)
       fileList.value.push({file, url})
     }
 
     document.body.style.cursor = 'auto'
   }
-  fileInput.click()
+  input.click()
 }
 
 onUnmounted(() => {
@@ -110,25 +109,17 @@ const handlePaste = (e: ClipboardEvent) => {
       </UButton>
       <ul v-if="selectedModel.type === 'universal'" style="margin: 0"
           class="flex flex-wrap bg-white dark:bg-[#121212] rounded-t-md">
-        <li v-for="file in fileList" :key="file.url" class="relative group/img flex items-center">
+        <li v-for="file in fileList" :key="file.url" class="relative group/img">
           <button @click="fileList.splice(fileList.indexOf(file), 1)"
-                  class="absolute z-10 hidden group-hover/img:block rounded-full bg-neutral-100 right-0 top-0 hover:brightness-75 dark:bg-[#121212] transition-all">
+                  class="absolute z-10 hidden group-hover/img:block rounded-full bg-neutral-100 right-0 hover:brightness-75 dark:bg-[#121212] transition-all">
             <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 16 16">
               <path fill="currentColor"
                     d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94z"/>
             </svg>
           </button>
-          
-          <!-- 图片显示预览图 -->
-          <img v-if="file.file.type.startsWith('image/')" :src="file.url"
+          <img :src="file.url"
                class="max-h-16 m-1 shadow-xl cursor-pointer group-hover/img:brightness-75 transition-all rounded-md"
                alt="selected image" @click="handleImgZoom($event.target as HTMLImageElement)"/>
-          
-          <!-- PDF/TXT等文档显示图标与文件名 -->
-          <div v-else class="max-h-16 m-1 p-2 bg-gray-100 dark:bg-gray-800 rounded-md flex items-center text-xs space-x-1 border border-gray-200 dark:border-gray-700">
-            <UIcon name="i-heroicons-document-text-solid" class="w-5 h-5 text-primary-500" />
-            <span class="max-w-[100px] truncate">{{ file.file.name }}</span>
-          </div>
         </li>
       </ul>
     </div>
