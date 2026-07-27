@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useLocalStorage } from "@vueuse/core";
-import { toRaw } from "vue";
+import { toRaw, nextTick } from "vue";
 
 const route = useRoute()
 const router = useRouter()
@@ -64,7 +64,7 @@ async function handleNewChat() {
 
   await nextTick(() => {
     const tabEl = document.getElementById('tabEl')
-    scrollToTop(tabEl)
+    if(tabEl) scrollToTop(tabEl)
   })
 }
 
@@ -106,7 +106,7 @@ function basicCatch(e: Error) {
   history.value[history.value.length - 1].type = 'error'
   nextTick(() => {
     const chatList = document.getElementById('chatList')
-    scrollToTop(chatList)
+    if(chatList) scrollToTop(chatList)
   })
   DB.history.add(toRaw(history.value[history.value.length - 1]))
 }
@@ -123,108 +123,101 @@ async function handleSend(input: string, addHistory: boolean, files: {
   file: File
   url: string
 }[]) {
-  try {
-    loading.value = true
-    const type = selectedModel.value.type
+  loading.value = true
+  const type = selectedModel.value?.type || 'universal'
 
-    if (history.value.length === 0) {
-      const label = input.substring(0, 15)
-      DB.tab.update(session, {label}).then(() => {
-        // 增加容错保护，防止找不到对话 ID 时直接崩溃报错
-        const tab = tabs.value.find(i => i.id === session)
-        if (tab) tab.label = label
-      })
-    }
-
-    if (files.length) {
-      await addFiles(files)
-    }
-
-    const historyItem: HistoryItem = {
-      session,
-      role: 'user',
-      content: input,
-      type: type === 'text-to-image' ? 'image-prompt' : 'text',
-      created_at: Date.now()
-    }
-    const id = await DB.history.add(historyItem) as number
-    history.value.push({
-      id,
-      ...historyItem
+  if (history.value.length === 0) {
+    const label = input.substring(0, 15)
+    DB.tab.update(session, {label}).then(() => {
+      const tab = tabs.value.find(i => i.id === session)
+      if (tab) tab.label = label
     })
-    history.value.push({
-      id: id + 1,
-      session,
-      role: 'assistant',
-      content: '',
-      type: (type === 'chat' || type === 'universal') ? 'text' : 'image',
-      created_at: Date.now()
-    })
+  }
 
-    const chatList = document.getElementById('chatList') as HTMLElement
-    nextTick(() => {
-      scrollToTop(chatList)
-    }).then(r => r)
+  if (files.length) {
+    await addFiles(files)
+  }
 
-    const req = {
-      model: selectedModel.value.id,
-      messages: getMessages(toRaw(history.value), {addHistory, type})
-    }
-    
-    switch (selectedModel.value.provider) {
-      case 'openai':
-        openAIReq({
-          ...req,
-          endpoint: selectedModel.value.endpoint!,
-          key: settings.value.openaiKey === '' ? undefined : settings.value.openaiKey
-        }, text => {
-          history.value[history.value.length - 1].content += text
-          scrollStream(chatList)
-        }).then(basicDone).catch(basicCatch).finally(basicFin)
-        break
-      case "workers-ai":
-        workersReq(req, res => {
-          history.value[history.value.length - 1].content += res
-          scrollStream(chatList)
-        }).then(basicDone).catch(basicCatch).finally(basicFin)
-        break
-      case "workers-ai-image":
-        workersImageReq({
-          ...req,
-          num_steps: settings.value.image_steps,
-        }).then(res => {
-          const blob = res as Blob
-          Object.assign(history.value[history.value.length - 1], {
-            content: input,
-            src: [blob],
-            src_url: [URL.createObjectURL(blob)]
-          })
+  const historyItem: HistoryItem = {
+    session,
+    role: 'user',
+    content: input,
+    type: type === 'text-to-image' ? 'image-prompt' : 'text',
+    created_at: Date.now()
+  }
+  const id = await DB.history.add(historyItem) as number
+  history.value.push({
+    id,
+    ...historyItem
+  })
+  history.value.push({
+    id: id + 1,
+    session,
+    role: 'assistant',
+    content: '',
+    type: (type === 'chat' || type === 'universal') ? 'text' : 'image',
+    created_at: Date.now()
+  })
 
-          setTimeout(() => {
-            scrollToTop(chatList)
-            basicFin()
-          }, 100)
-        }).then(() => {
-          const store = {...toRaw(history.value[history.value.length - 1])}
-          delete store.src_url
-          DB.history.add(store)
-        }).catch(basicCatch)
-        break
-      case "google":
-        const form = new FormData()
-        form.append('model', req.model)
-        form.append('messages', JSON.stringify(req.messages))
-        files.forEach(i => form.append('files', i.file))
-        geminiReq(form, text => {
-          history.value[history.value.length - 1].content += text
-          scrollStream(chatList, 512)
-        }).then(basicDone).catch(basicCatch).finally(basicFin)
-        break
-    }
-  } catch (err: any) {
-    loading.value = false;
-    console.error("handleSend 执行出错:", err);
-    alert("发送异常: " + err.message);
+  // 加入容错保护：确保 chatList 元素未被意外卸载
+  const chatList = document.getElementById('chatList') as HTMLElement
+  nextTick(() => {
+    if(chatList) scrollToTop(chatList)
+  }).then(r => r)
+
+  const req = {
+    model: selectedModel.value.id,
+    messages: getMessages(toRaw(history.value), {addHistory, type})
+  }
+  switch (selectedModel.value.provider) {
+    case 'openai':
+      openAIReq({
+        ...req,
+        endpoint: selectedModel.value.endpoint!,
+        key: settings.value.openaiKey === '' ? undefined : settings.value.openaiKey
+      }, text => {
+        history.value[history.value.length - 1].content += text
+        if(chatList) scrollStream(chatList)
+      }).then(basicDone).catch(basicCatch).finally(basicFin)
+      break
+    case "workers-ai":
+      workersReq(req, res => {
+        history.value[history.value.length - 1].content += res
+        if(chatList) scrollStream(chatList)
+      }).then(basicDone).catch(basicCatch).finally(basicFin)
+      break
+    case "workers-ai-image":
+      workersImageReq({
+        ...req,
+        num_steps: settings.value.image_steps,
+      }).then(res => {
+        const blob = res as Blob
+        Object.assign(history.value[history.value.length - 1], {
+          content: input,
+          src: [blob],
+          src_url: [URL.createObjectURL(blob)]
+        })
+
+        setTimeout(() => {
+          if(chatList) scrollToTop(chatList)
+          basicFin()
+        }, 100)
+      }).then(() => {
+        const store = {...toRaw(history.value[history.value.length - 1])}
+        delete store.src_url
+        DB.history.add(store)
+      }).catch(basicCatch)
+      break
+    case "google":
+      const form = new FormData()
+      form.append('model', req.model)
+      form.append('messages', JSON.stringify(req.messages))
+      files.forEach(i => form.append('files', i.file))
+      geminiReq(form, text => {
+        history.value[history.value.length - 1].content += text
+        if(chatList) scrollStream(chatList, 512)
+      }).then(basicDone).catch(basicCatch).finally(basicFin)
+      break
   }
 }
 
@@ -235,7 +228,7 @@ async function addFiles(files: {
   const historyItem: HistoryItem = {
     session,
     role: 'user',
-    content: '[上传了附件]',
+    content: 'input image', 
     type: 'image',
     created_at: Date.now(),
     src: files.map(i => i.file),
