@@ -1,115 +1,153 @@
 <script setup lang="ts">
-import MarkdownIt from "markdown-it"
-import markdownit from "markdown-it"
-import hljs from "highlight.js";
-import 'highlight.js/styles/github-dark-dimmed.min.css'
+import {compressionFile, handleImgZoom} from "~/utils/tools";
 
-defineProps<{
-  history: HistoryItem[]
+const input = ref('')
+const addHistory = ref(true)
+const fileList = ref<{
+  file: File
+  url: string
+}>([])
+const {openModelSelect} = useGlobalState()
+
+onMounted(() => {
+  addHistory.value = localStorage.getItem('addHistory') === 'true'
+})
+watch(addHistory, () => {
+  localStorage.setItem('addHistory', addHistory.value.toString())
+})
+
+const p = defineProps<{
   loading: boolean
+  selectedModel: Model
+
+  handleSend: (input: string, addHistory: boolean, files: {
+    file: File
+    url: string
+  }[]) => void
 }>()
 
-const md: MarkdownIt = markdownit({
-  linkify: true,
-  highlight: (code, language) => {
-    if (language && hljs.getLanguage(language)) {
-      return `<pre class="hljs"><code>${hljs.highlight(code, {language}).value}</code></pre>`;
+function handleInput(e: KeyboardEvent) {
+  if (e.shiftKey) {
+    input.value += '\n'
+  }
+  if (e.isComposing || e.shiftKey) {
+    return
+  }
+
+  if (input.value.trim() === '') return
+  if (p.loading) return
+  p.handleSend(input.value, addHistory.value, toRaw(fileList.value))
+  input.value = ''
+  fileList.value = []
+}
+
+// 检查文件数量限制（允许单次上传最多 5 个文件）
+function checkFile(file: File) {
+  if (fileList.value.length >= 5) {
+    alert('You can only upload up to 5 files')
+    return false
+  }
+  return true
+}
+
+function handleAddFiles() {
+  const fileInput = document.createElement('input')
+  fileInput.type = 'file'
+  fileInput.accept = '*' // 允许选取任意文件格式
+  fileInput.multiple = true
+  fileInput.onchange = async () => {
+    document.body.style.cursor = 'wait'
+
+    const files = Array.from(fileInput.files || [])
+    for (const f of files) {
+      if (!checkFile(f)) continue;
+      
+      let file = f;
+      // 仅对图片格式做压缩处理，文档等非图片类型不执行压缩
+      if (f.type.startsWith('image/')) {
+        try {
+          file = await compressionFile(f, f.type)
+        } catch (e) {
+          console.error('Image compression failed:', e)
+        }
+      }
+
+      const url = URL.createObjectURL(file)
+      fileList.value.push({file, url})
     }
-    return `<pre class="hljs"><code>${hljs.highlightAuto(code).value}</code></pre>`;
-  },
+
+    document.body.style.cursor = 'auto'
+  }
+  fileInput.click()
+}
+
+onUnmounted(() => {
+  fileList.value.forEach(i => {
+    URL.revokeObjectURL(i.url)
+  })
 })
+
+const handlePaste = (e: ClipboardEvent) => {
+  const files = Array.from(e.clipboardData?.files || [])
+  files.forEach(file => {
+    if (!checkFile(file)) return
+
+    const url = URL.createObjectURL(file)
+    fileList.value.push({file, url})
+  })
+}
 </script>
 
 <template>
-  <ul class="overflow-y-auto overflow-x-hidden scrollbar-hide pt-24 pb-16 pl-1 flex flex-col space-y-1">
-    <template v-for="(i,index) in history" :key="i.id">
-      <template v-if="!i.content">
-        <USkeleton class="loading-item"/>
-      </template>
-      <template v-else>
-        <template v-if="i.role==='user'">
-          <li v-if="i.type === 'text' || i.type === 'image-prompt'" class="user chat-item user-text">
-            {{ i.content }}
-          </li>
-          <li v-else-if="i.type === 'image'" class="user image-item">
-            <template v-for="img_url in i.src_url" :key="img_url">
-              <img @click="handleImgZoom($event.target as HTMLImageElement)" :src="img_url" :alt="img_url" class="image"
-                   :class="i.src_url?.length === 1 ? 'max-h-64' : (i.src_url?.length === 2 ? 'max-h-32': 'max-h-16')"/>
-            </template>
-          </li>
+  <div class="relative">
+    <div class="absolute bottom-10 w-full flex flex-col">
+      <UButton class="self-center drop-shadow-xl mb-1 blur-global" color="white"
+               @click="openModelSelect=!openModelSelect">
+        {{ selectedModel.name }}
+        <template #trailing>
+          <UIcon name="i-heroicons-chevron-down-solid"/>
         </template>
-        <template v-else>
-          <li v-if="i.type === 'text'" v-html="md.render(i.content)"
-              class="assistant chat-item assistant-text prose prose-pre:break-words prose-pre:whitespace-pre-wrap"
-              :class="index+1===history.length && loading ?  'loading':''"/>
-          <li v-else-if="i.type === 'image'" class="assistant image-item">
-            <template v-for="img_url in i.src_url" :key="img_url">
-              <img @click="handleImgZoom($event.target as HTMLImageElement)" :src="img_url" :alt="img_url"
-                   class="image"/>
-            </template>
-          </li>
-          <li v-else-if="i.type==='error'" class="assistant chat-item assistant-error">
-            {{ i.content }}
-          </li>
-        </template>
-      </template>
-    </template>
-  </ul>
+      </UButton>
+      <ul v-if="selectedModel.type === 'universal'" style="margin: 0"
+          class="flex flex-wrap bg-white dark:bg-[#121212] rounded-t-md">
+        <li v-for="file in fileList" :key="file.url" class="relative group/img flex items-center">
+          <button @click="fileList.splice(fileList.indexOf(file), 1)"
+                  class="absolute z-10 hidden group-hover/img:block rounded-full bg-neutral-100 right-0 top-0 hover:brightness-75 dark:bg-[#121212] transition-all">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 16 16">
+              <path fill="currentColor"
+                    d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94z"/>
+            </svg>
+          </button>
+          
+          <!-- 图片显示预览图 -->
+          <img v-if="file.file.type.startsWith('image/')" :src="file.url"
+               class="max-h-16 m-1 shadow-xl cursor-pointer group-hover/img:brightness-75 transition-all rounded-md"
+               alt="selected image" @click="handleImgZoom($event.target as HTMLImageElement)"/>
+          
+          <!-- PDF/TXT等文档显示图标与文件名 -->
+          <div v-else class="max-h-16 m-1 p-2 bg-gray-100 dark:bg-gray-800 rounded-md flex items-center text-xs space-x-1 border border-gray-200 dark:border-gray-700">
+            <UIcon name="i-heroicons-document-text-solid" class="w-5 h-5 text-primary-500" />
+            <span class="max-w-[100px] truncate">{{ file.file.name }}</span>
+          </div>
+        </li>
+      </ul>
+    </div>
+    <div class="flex items-end">
+      <UTooltip :text="addHistory?$t('with_history'):$t('without_history')">
+        <UButton class="m-1" @click="addHistory = !addHistory" :color="addHistory?'primary':'gray'"
+                 icon="i-heroicons-clock-solid"/>
+      </UTooltip>
+      <UTooltip v-if="selectedModel.type === 'universal'" :text="$t('add_image') + '(' + $t('support_paste') + ')'">
+        <UButton @click="handleAddFiles" color="white" class="m-1" icon="i-heroicons-paper-clip-16-solid"/>
+      </UTooltip>
+      <UTextarea v-model="input" :placeholder="$t('please_input_text') + '...' "
+                 @keydown.prevent.enter="handleInput($event)"
+                 @paste="handlePaste"
+                 autofocus :rows="1" autoresize
+                 class="flex-1 max-h-48 overflow-y-auto p-1"/>
+      <UButton @click="handleInput($event)" :disabled="loading" class="m-1">
+        {{ $t('send') }}
+      </UButton>
+    </div>
+  </div>
 </template>
-
-<style scoped lang="postcss">
-.loading-item {
-  @apply rounded-xl px-2 py-1.5 h-10 shrink-0 w-1/3 animate-pulse
-}
-
-.user {
-  @apply self-end slide-top
-}
-
-.assistant {
-  @apply slide-top
-}
-
-.chat-item {
-  @apply break-words rounded-xl px-2 py-1.5 max-w-[95%] md:max-w-[80%]
-}
-
-.image-item {
-  @apply flex rounded-xl space-x-1 max-w-[95%] md:max-w-[60%]
-}
-
-.image {
-  @apply cursor-pointer hover:brightness-75 transition-all rounded-md
-}
-
-.user-text {
-  @apply bg-green-500 text-white dark:bg-green-700 dark:text-gray-300
-}
-
-.assistant-text {
-  @apply self-start bg-gray-200 text-black dark:bg-gray-400
-}
-
-.assistant-error {
-  @apply self-start bg-red-200 dark:bg-red-400 dark:text-black
-}
-
-.user-text::selection {
-  @apply text-neutral-900 bg-gray-300
-}
-
-.slide-top {
-  animation: slide-top .25s cubic-bezier(.25, .46, .45, .94) both
-}
-
-@keyframes slide-top {
-  0% {
-    transform: translateY(0);
-    opacity: 0
-  }
-  100% {
-    transform: translateY(-16px);
-    opacity: 1
-  }
-}
-</style>
