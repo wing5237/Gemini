@@ -1,15 +1,14 @@
 <script setup lang="ts">
-import { useLocalStorage } from "@vueuse/core";
-import { toRaw, nextTick } from "vue";
+import {useLocalStorage} from "@vueuse/core";
 
 const route = useRoute()
 const router = useRouter()
-const { t } = useI18n()
+const {t} = useI18n()
 
 const tabs = ref<TabItem[]>([])
 const history = ref<HistoryItem[]>([])
 const selectedTab = ref(0)
-const { selectedModel } = useGlobalState()
+const {selectedModel} = useGlobalState()
 const initializing = ref(true)
 const loading = ref(false)
 let settings: Ref<Settings>
@@ -53,6 +52,7 @@ onMounted(async () => {
   }
 
   settings = useLocalStorage('settings', initialSettings)
+
   initializing.value = false
 })
 
@@ -64,7 +64,7 @@ async function handleNewChat() {
 
   await nextTick(() => {
     const tabEl = document.getElementById('tabEl')
-    if(tabEl) scrollToTop(tabEl)
+    scrollToTop(tabEl)
   })
 }
 
@@ -106,7 +106,7 @@ function basicCatch(e: Error) {
   history.value[history.value.length - 1].type = 'error'
   nextTick(() => {
     const chatList = document.getElementById('chatList')
-    if(chatList) scrollToTop(chatList)
+    scrollToTop(chatList)
   })
   DB.history.add(toRaw(history.value[history.value.length - 1]))
 }
@@ -124,13 +124,12 @@ async function handleSend(input: string, addHistory: boolean, files: {
   url: string
 }[]) {
   loading.value = true
-  const type = selectedModel.value?.type || 'universal'
+  const type = selectedModel.value.type
 
   if (history.value.length === 0) {
     const label = input.substring(0, 15)
     DB.tab.update(session, {label}).then(() => {
-      const tab = tabs.value.find(i => i.id === session)
-      if (tab) tab.label = label
+      tabs.value.find(i => i.id === session)!.label = label
     })
   }
 
@@ -159,10 +158,9 @@ async function handleSend(input: string, addHistory: boolean, files: {
     created_at: Date.now()
   })
 
-  // 加入容错保护：确保 chatList 元素未被意外卸载
   const chatList = document.getElementById('chatList') as HTMLElement
   nextTick(() => {
-    if(chatList) scrollToTop(chatList)
+    scrollToTop(chatList)
   }).then(r => r)
 
   const req = {
@@ -177,13 +175,13 @@ async function handleSend(input: string, addHistory: boolean, files: {
         key: settings.value.openaiKey === '' ? undefined : settings.value.openaiKey
       }, text => {
         history.value[history.value.length - 1].content += text
-        if(chatList) scrollStream(chatList)
+        scrollStream(chatList)
       }).then(basicDone).catch(basicCatch).finally(basicFin)
       break
     case "workers-ai":
       workersReq(req, res => {
         history.value[history.value.length - 1].content += res
-        if(chatList) scrollStream(chatList)
+        scrollStream(chatList)
       }).then(basicDone).catch(basicCatch).finally(basicFin)
       break
     case "workers-ai-image":
@@ -199,7 +197,7 @@ async function handleSend(input: string, addHistory: boolean, files: {
         })
 
         setTimeout(() => {
-          if(chatList) scrollToTop(chatList)
+          scrollToTop(chatList)
           basicFin()
         }, 100)
       }).then(() => {
@@ -215,7 +213,7 @@ async function handleSend(input: string, addHistory: boolean, files: {
       files.forEach(i => form.append('files', i.file))
       geminiReq(form, text => {
         history.value[history.value.length - 1].content += text
-        if(chatList) scrollStream(chatList, 512)
+        scrollStream(chatList, 512)
       }).then(basicDone).catch(basicCatch).finally(basicFin)
       break
   }
@@ -228,7 +226,7 @@ async function addFiles(files: {
   const historyItem: HistoryItem = {
     session,
     role: 'user',
-    content: 'input image', 
+    content: 'input image',
     type: 'image',
     created_at: Date.now(),
     src: files.map(i => i.file),
