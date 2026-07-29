@@ -16,15 +16,69 @@ export default defineEventHandler(async (event) => {
     const messages: OpenAIMessage[] = JSON.parse(<string>body.get('messages'));
     const files = body.getAll('files') as File[];
 
-    // 1. 上下文滑动窗口压缩：过滤 system 后，只保留最近的 40 条记录（即 20 轮对话）
-    const historyMessages = messages.filter(m => m.role !== 'system').slice(-40);
+    const ai = new GoogleGenAI({
+        apiKey: apiKey,
+        vertexai: projectId ? {
+            project: projectId,
+            location: location
+        } : undefined
+    });
+
+    // 过滤掉原有的 system 消息，便于我们自己控制
+    let historyMessages = messages.filter(m => m.role !== 'system');
+    
+    // -------------------------------------------------------------
+    // 1. 上下文链式压缩逻辑 (每 20 轮/40条 触发一次压缩)
+    // -------------------------------------------------------------
+    const MAX_HISTORY_LENGTH = 40; // 触发压缩的阈值 (20轮)
+    const COMPRESS_COUNT = 20;     // 每次拿前多少条去压缩 (10轮)
+    let summaryText = "";
+
+    if (historyMessages.length > MAX_HISTORY_LENGTH) {
+        const messagesToCompress = historyMessages.slice(0, COMPRESS_COUNT);
+        // 保留剩下的消息（最新的）
+        historyMessages = historyMessages.slice(COMPRESS_COUNT);
+
+        // 拼接需要压缩的文本
+        const textToCompress = messagesToCompress.map(m => 
+            `${m.role === 'assistant' ? 'AI' : 'User'}: ${m.content}`
+        ).join('\n');
+
+        try {
+            // 调用模型生成摘要 (使用较快且便宜的模型)
+            const summaryResponse = await ai.models.generateContent({
+                model: 'gemini-3.6-flash',
+                contents: [{
+                    role: 'user',
+                    parts: [{ text: `请将以下之前的对话记录压缩成一段精炼的摘要，保留核心需求、关键设定和未解决的问题，舍弃寒暄和无用信息。\n\n对话记录:\n${textToCompress}` }]
+                }]
+            });
+            summaryText = summaryResponse.text || "";
+            console.log("成功生成历史对话摘要");
+        } catch (compressError) {
+            console.error('压缩历史对话失败，回退至截断策略:', compressError);
+            // 降级处理：如果压缩失败，就不带摘要，继续往下走
+        }
+    }
+
     const latestMessage = historyMessages.pop();
 
     if (!latestMessage) {
         return new Response('明细数据为空，请重新开始对话', { status: 400 });
     }
 
+    // -------------------------------------------------------------
+    // 2. 组装请求 Contents
+    // -------------------------------------------------------------
     const contents: any[] = [];
+
+    // 如果生成了摘要，或者前端原本传了系统提示，在这里注入
+    const originalSystemMsg = messages.find(m => m.role === 'system');
+    let systemInstructionText = originalSystemMsg ? originalSystemMsg.content : "";
+    if (summaryText) {
+        systemInstructionText += `\n\n[之前的对话摘要]:\n${summaryText}`;
+    }
+
     for (const msg of historyMessages) {
         contents.push({
             role: msg.role === 'assistant' ? 'model' : 'user',
@@ -32,12 +86,11 @@ export default defineEventHandler(async (event) => {
         });
     }
 
-    // 2. 多模态文件与图片处理透传
+    // 多模态文件与图片处理透传
     const latestParts: any[] = [];
     if (files.length) {
         for (const file of files) {
             const buffer = Buffer.from(await file.arrayBuffer());
-            // 提取准确的 MIME 类型，确保大模型能正确识别是 PDF 还是图像
             const mimeType = file.type || 'application/octet-stream';
             
             latestParts.push({
@@ -48,6 +101,7 @@ export default defineEventHandler(async (event) => {
             });
         }
     }
+    
     // 将最新输入的文字追加到文件数据之后
     latestParts.push({ text: latestMessage.content });
 
@@ -56,36 +110,36 @@ export default defineEventHandler(async (event) => {
         parts: latestParts
     });
 
-    // 3. 初始化最新 SDK，兼容 Cloudflare 代理
-    const ai = new GoogleGenAI({
-        apiKey: apiKey,
-        // 若使用你的 Cloudflare Worker 代理域名，取消下方注释：
-        // baseUrl: 'https://api.wingjj.dpdns.org',
-        vertexai: projectId ? {
-            project: projectId,
-            location: location
-        } : undefined
-    });
-
+    // -------------------------------------------------------------
+    // 3. 发起主模型请求 (流式)
+    // -------------------------------------------------------------
     try {
-        // 使用 SDK 的流式调用
+        const generateConfig: any = {
+            tools: [{ googleSearch: {} }],
+            safetySettings: [
+                { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+                { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+                { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+                { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+            ]
+        };
+
+        // 如果有 System Instruction (包含前端传的或我们刚刚生成的摘要)，则加入配置
+        if (systemInstructionText.trim() !== "") {
+             generateConfig.systemInstruction = {
+                 role: "system",
+                 parts: [{ text: systemInstructionText.trim() }]
+             };
+        }
+
         const responseStream = await ai.models.generateContentStream({
             model: model,
             contents: contents,
-            config: {
-                tools: [{ googleSearch: {} }],
-                safetySettings: [
-                    { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
-                    { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
-                    { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
-                    { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
-                ]
-            }
+            config: generateConfig
         });
 
         const textEncoder = new TextEncoder();
         
-        // 封装为前端需要的 ReadableStream
         const readableStream = new ReadableStream({
             async start(controller) {
                 try {
