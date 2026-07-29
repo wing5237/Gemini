@@ -10,7 +10,7 @@ const fileList = ref<{
 const {openModelSelect} = useGlobalState()
 
 onMounted(() => {
-  addHistory.value = localStorage.getItem('addHistory') === 'true'
+  addHistory.value = localStorage.getItem('addHistory') === 'false'
 })
 watch(addHistory, () => {
   localStorage.setItem('addHistory', addHistory.value.toString())
