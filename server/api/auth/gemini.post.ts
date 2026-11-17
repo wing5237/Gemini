@@ -23,7 +23,7 @@ export default defineEventHandler(async (event) => {
     // gemini-4-hydrogen 仅支持 global / us / eu，不要写成 asia-southeast1 等区域端点
     const location = process.env.GCP_LOCATION || 'global';
     // 4 系默认思考等级是 HIGH，首字会明显变慢；这里默认压到 LOW，可用环境变量覆盖
-    const thinkingLevel = process.env.GEMINI_THINKING_LEVEL || 'LOW';
+    const thinkingLevel = process.env.GEMINI_THINKING_LEVEL || 'HIGH';
     // 历史压缩用的模型
     const summaryModel = process.env.GEMINI_SUMMARY_MODEL || 'gemini-3.8-flash';
     // 可选兜底：把服务账号 JSON 整段塞进 Vercel 环境变量（API key 无权访问项目端点时用）
