@@ -77,8 +77,8 @@ export const uniModals: Model[] = [
         type: 'universal'
     },
     {
-        id: 'gemini-3.5-flash-lite',
-        name: 'Gemini 3.5 Flash Lite',
+        id: 'gemini-4-hydrogen',
+        name: 'Gemini 4 Hybrogen',
         provider: 'google',
         type: 'universal'
     }
