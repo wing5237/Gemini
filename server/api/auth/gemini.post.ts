@@ -5,7 +5,7 @@ import { GoogleGenAI } from '@google/genai';
 export default defineEventHandler(async (event) => {
     const apiKey = process.env.G_API_KEY;
     const projectId = process.env.GCP_PROJECT_ID;
-    const location = 'us-central1';
+    const location = 'global';
 
     if (!apiKey) {
         return new Response('未配置 G_API_KEY 环境变量', { status: 500 });
